@@ -43,14 +43,15 @@ module Nascunna
         association.class_name == base.name
       end
 
-      @@invalidations[dest_class.name] ||= []
+      @@invalidations[dest_class.name] ||= Set.new
       targets.each do |to_invalidate|
         @@invalidations[dest_class.name] << {
           :macro => to_invalidate.macro,
           :association_name => to_invalidate.name,
           :root_name => @model.name,
           :root => to_invalidate.class_name == @model.name,
-          :method => @method_sym
+          :method => @method_sym,
+          :activated => false
         }
       end
     end
