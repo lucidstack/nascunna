@@ -52,7 +52,8 @@ module Nascunna
           :method => method_sym,
           :association_name => :self,
           :root_name => self.name,
-          :macro => :belongs_to
+          :macro => :belongs_to,
+          :activated => false
         }) if opts[:self_invalidates]
       end
 
@@ -60,47 +61,53 @@ module Nascunna
 
       def add_direct_invalidation(model, opts)
         model.class_eval <<-EOS
-          after_update :invalidate_#{opts[:root_name]}_#{opts[:method]}
+          after_commit :invalidate_#{opts[:root_name]}_#{opts[:method]}
 
           if #{opts[:macro].inspect} == :belongs_to
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
-              $redis.del("cache:#{opts[:root_name]}:\#\{self.instance_eval("#{opts[:association_name]}").id\}:#{opts[:method]}")
+              return "cache:#{opts[:root_name]}:\#\{self.instance_eval("#{opts[:association_name]}").id\}:#{opts[:method]}"
             end
+
           else
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
               association_ids = self.instance_eval("#{opts[:association_name]}").collect(&:id)
-              $redis.del(association_ids.collect{|id| "cache:#{opts[:root_name]}:\#\{id\}:#{opts[:method]}"}) if association_ids.any?
+              return association_ids.collect{|id| "cache:#{opts[:root_name]}:\#\{id\}:#{opts[:method]}"} if association_ids.any?
+              return []
             end
+
           end
 
           private :invalidate_#{opts[:root_name]}_#{opts[:method]}
         EOS
+        opts[:activated] = true
+        opts
       end
 
       def add_indirect_invalidation(model, opts)
         model.class_eval <<-EOS
-          after_update :invalidate_#{opts[:root_name]}_#{opts[:method]}
+
+          after_commit :invalidate_#{opts[:root_name]}_#{opts[:method]}
 
           if #{opts[:macro].inspect} == :belongs_to
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
               if from.nil?
                 $redis.pipelined do
-                  self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
+                  $redis.del(self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self).flatten)
                 end
               else
-                self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
+                return self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
               end
             end
           else
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
               if from.nil?
                 $redis.pipelined do
-                  self.instance_eval("#{opts[:association_name]}").each do |association|
+                  $redis.del(self.instance_eval("#{opts[:association_name]}").collect do |association|
                     association.send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
-                  end
+                  end.flatten)
                 end
               else
-                self.instance_eval("#{opts[:association_name]}").each do |association|
+                return self.instance_eval("#{opts[:association_name]}").collect do |association|
                   association.send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
                 end
               end
@@ -109,18 +116,23 @@ module Nascunna
 
           private :invalidate_#{opts[:root_name]}_#{opts[:method]}
         EOS
+        opts[:activated] = true
+        opts
       end
 
       private
 
       def activate_invalidations
         return unless invalidations = Nascunna::Configuration.invalidations[self.name]
-        invalidations.each do |invalidation|
-          if invalidation[:root]
-            add_direct_invalidation(self, invalidation)
-          else
-            add_indirect_invalidation(self, invalidation)
+        Nascunna::Configuration.invalidations[self.name] = invalidations.collect do |invalidation|
+          unless invalidation[:activated]
+            if invalidation[:root]
+              add_direct_invalidation(self, invalidation)
+            else
+              add_indirect_invalidation(self, invalidation)
+            end
           end
+          invalidation
         end
       end
 
