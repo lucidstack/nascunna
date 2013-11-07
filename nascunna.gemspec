@@ -1,4 +1,5 @@
 Gem::Specification.new do |s|
+  s.license = 'MIT'
   s.name        = 'nascunna'
   s.version     = '0.0.1'
   s.summary     = "System-wide caching system based on Redis"
@@ -11,5 +12,6 @@ Gem::Specification.new do |s|
     "lib/nascunna.rb",
     "nascunna.gemspec"
   ]
+  s.add_runtime_dependency 'redis'
   # s.homepage    = 'https://rubygems.org/gems/example'
 end
