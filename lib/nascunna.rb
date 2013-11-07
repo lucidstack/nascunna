@@ -3,6 +3,14 @@ require "cacheable"
 
 module Nascunna
 
+  def self.redis
+    @redis
+  end
+
+  def self.redis=(redis_instance)
+    @redis = redis_instance
+  end
+
   def self.add_model(model)
     @model = model
     yield(self)

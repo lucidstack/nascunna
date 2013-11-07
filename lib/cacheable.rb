@@ -19,15 +19,15 @@ module Nascunna
 
           if instance_method(:#{method_sym}).arity == 0
             def #{method_sym}
-              if value = $redis.get("cache:#{self}:\#\{self.id\}:#{method_sym}")
+              if value = Nascunna.redis.get("cache:#{self}:\#\{self.id\}:#{method_sym}")
                 return Marshal.load(value)
               end
 
               value = #{original_method}
               if #{exp_seconds.present?}
-                $redis.setex("cache:#{self}:\#\{self.id\}:#{method_sym}", #{exp_seconds.to_i}, Marshal.dump(value))
+                Nascunna.redis.setex("cache:#{self}:\#\{self.id\}:#{method_sym}", #{exp_seconds.to_i}, Marshal.dump(value))
               else
-                $redis.set("cache:#{self}:\#\{self.id\}:#{method_sym}", Marshal.dump(value))
+                Nascunna.redis.set("cache:#{self}:\#\{self.id\}:#{method_sym}", Marshal.dump(value))
               end
               return value
             end
@@ -36,13 +36,13 @@ module Nascunna
 
             def #{method_sym}(*args)
               key = Marshal.dump(args)
-              if value = $redis.hget("cache:#{self}:\#\{self.id\}:#{method_sym}", key)
+              if value = Nascunna.redis.hget("cache:#{self}:\#\{self.id\}:#{method_sym}", key)
                 return Marshal.load(value)
               end
 
               value = #{original_method}(*args)
-              $redis.hset("cache:#{self}:\#\{self.id\}:#{method_sym}", key, Marshal.dump(value))
-              $redis.expire("cache:#{self}:\#\{self.id\}:#{method_sym}", #{exp_seconds.to_i}) if #{exp_seconds.present?}
+              Nascunna.redis.hset("cache:#{self}:\#\{self.id\}:#{method_sym}", key, Marshal.dump(value))
+              Nascunna.redis.expire("cache:#{self}:\#\{self.id\}:#{method_sym}", #{exp_seconds.to_i}) if #{exp_seconds.present?}
               return value
             end
 
@@ -91,9 +91,7 @@ module Nascunna
           if #{opts[:macro].inspect} == :belongs_to
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
               if from.nil?
-                $redis.pipelined do
-                  $redis.del(self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self).flatten)
-                end
+                Nascunna.redis.del(self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self).flatten)
               else
                 return self.instance_eval("#{opts[:association_name]}").send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
               end
@@ -101,11 +99,9 @@ module Nascunna
           else
             def invalidate_#{opts[:root_name]}_#{opts[:method]}(from=nil)
               if from.nil?
-                $redis.pipelined do
-                  $redis.del(self.instance_eval("#{opts[:association_name]}").collect do |association|
-                    association.send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
-                  end.flatten)
-                end
+                Nascunna.redis.del(self.instance_eval("#{opts[:association_name]}").collect do |association|
+                  association.send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
+                end.flatten)
               else
                 return self.instance_eval("#{opts[:association_name]}").collect do |association|
                   association.send(:invalidate_#{opts[:root_name]}_#{opts[:method]}, self)
